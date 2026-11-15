@@ -1,0 +1,110 @@
+name: Build and publish image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - entrypoint.sh
+      - Caddyfile.tpl
+      - docker-compose.yml
+      - .github/workflows/docker.yml
+  schedule:
+    # 每周一 02:00 UTC：从零重建，让 dsh、Caddy 和基础镜像都刷新到最新。
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/cjjia/dsh-docker
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=schedule,pattern={{date 'YYYYMMDD'}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          pull: true
+          # 定时构建不带缓存，确保 dsh 和基础镜像都拿到最新版本。
+          no-cache: ${{ github.event_name == 'schedule' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and run the published image
+        run: |
+          docker pull ghcr.io/cjjia/dsh-docker:latest
+          docker run -d --name dsh-test -p 13080:3080 ghcr.io/cjjia/dsh-docker:latest
+          # 等容器就绪（最多 90 秒）
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:13080/ || true)
+            [ "$code" = "302" ] && break
+            sleep 2
+          done
+          docker exec dsh-test dsh --version
+          docker exec dsh-test caddy version
+          docker exec dsh-test curl --version | head -1
+
+      - name: Check the auto-redirect
+        run: |
+          # 1) 无 token 访问桥接 -> 302，且 Location 是带 token 的绝对 URL
+          LOC=$(curl -s -o /dev/null -D- --max-time 5 \
+            -H "X-Forwarded-Proto: https" -H "Host: dsh.example.com" \
+            http://127.0.0.1:13080/ | grep -i '^location:' | tr -d '\r')
+          echo "Location: $LOC"
+          echo "$LOC" | grep -q 'https://dsh.example.com/?token=' \
+            || { echo "expected absolute redirect with token, got: $LOC"; exit 1; }
+
+          # 2) dsh 自身无 token 仍返回 401（容器内部）
+          CODE=$(docker exec dsh-test curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3081/)
+          [ "$CODE" = "401" ] || { echo "expected 401 from dsh on :3081, got $CODE"; exit 1; }
+
+          # 3) 完整闭环：带 token 请求应 303 并下发 cookie
+          TOKEN=$(echo "$LOC" | sed -E 's/.*token=([A-Za-z0-9_-]+).*/\1/')
+          CODE=$(curl -s -o /dev/null -D /tmp/h.txt -c /tmp/c.txt -w "%{http_code}" --max-time 5 \
+            -H "Host: dsh.example.com" "http://127.0.0.1:13080/?token=$TOKEN")
+          [ "$CODE" = "303" ] || { echo "expected 303 from token exchange, got $CODE"; exit 1; }
+          grep -qi 'set-cookie:.*dsh-auth' /tmp/h.txt \
+            || { echo "expected dsh-auth cookie, got:"; cat /tmp/h.txt; exit 1; }
+
+          # 4) 带 cookie 应能拿到应用页面（不再跳转）
+          CODE=$(curl -s -o /tmp/page.html -w "%{http_code}" --max-time 5 \
+            -H "Host: dsh.example.com" -b /tmp/c.txt http://127.0.0.1:13080/)
+          [ "$CODE" = "200" ] || { echo "expected 200 with cookie, got $CODE"; exit 1; }
+          grep -q '<title>' /tmp/page.html \
+            || { echo "expected HTML page with title, got:"; head -c 300 /tmp/page.html; exit 1; }
+
+          echo "smoke test passed"

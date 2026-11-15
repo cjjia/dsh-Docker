@@ -1,0 +1,41 @@
+services:
+  dsh:
+    image: ghcr.io/cjjia/dsh-docker:latest
+    # 想从源码本地构建而不是拉取预构建镜像时，把上面 image 换成：
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    container_name: dsh
+    restart: unless-stopped
+    # 所有变量从 .env 读取（见 .env.example）。缺省值写在 ${VAR:-default} 里，
+    # 因此不建 .env 也能直接启动。
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DSH_HOME: ${DSH_HOME:-/root/.dsh}
+      # 桥接端口：宿主机上的域名反代到这个端口（默认 3080）。
+      BRIDGE_PORT: ${BRIDGE_PORT:-3080}
+      # 桥接监听地址。默认 0.0.0.0（容器外可访问）。
+      BRIDGE_BIND: ${BRIDGE_BIND:-0.0.0.0}
+      # dsh 自身监听端口（容器内部，只绑 loopback，不对外）。
+      DSH_PORT: ${DSH_PORT:-3081}
+    ports:
+      # 只暴露桥接端口；dsh 自身端口不对外。
+      # 宿主机反代只走本机回环时，推荐加上 127.0.0.1 前缀：
+      #   - "127.0.0.1:${BRIDGE_PORT:-3080}:${BRIDGE_PORT:-3080}"
+      - "${BRIDGE_PORT:-3080}:${BRIDGE_PORT:-3080}"
+    volumes:
+      # dsh 的 home：会话与凭证。
+      - ./data:/root/.dsh
+      # dsh 的工作目录。
+      - ./workspace:/workspace
+    healthcheck:
+      # 桥接无 token 访问 / 应返回 302（说明 dsh 已就绪且自动跳转生效）。
+      test:
+        - CMD-SHELL
+        - |
+          code=$$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:$${BRIDGE_PORT:-3080}/ || true)
+          case "$$code" in 302|200) exit 0 ;; *) exit 1 ;; esac
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
