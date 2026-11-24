@@ -104,11 +104,14 @@ server {
 
 ### 用别的端口
 
-容器默认用 `3080`。想换端口，改 `.env` 里的 `BRIDGE_PORT`，然后反代到新端口：
+容器默认用 `3080`。想换端口，直接改 `docker-compose.yml` 里的 `BRIDGE_PORT`
+（以及 `ports` 那一行），然后重建容器：
 
-```bash
-# .env
-BRIDGE_PORT=8080
+```yaml
+    environment:
+      BRIDGE_PORT: 8080
+    ports:
+      - "8080:8080"
 ```
 
 ```bash
@@ -117,9 +120,10 @@ docker compose up -d
 
 ## 配置
 
-所有变量都有默认值，不建 `.env` 也能直接跑。
+所有变量都直接写在 `docker-compose.yml` 的 `environment` 里，**不需要 `.env` 文件**。
+要改哪一项就直接改文件，然后 `docker compose up -d`。
 
-| 变量 | 默认值 | 说明 |
+| 变量 | 当前值 | 说明 |
 |---|---|---|
 | `BRIDGE_PORT` | `3080` | 对外暴露的端口，宿主机反代到这里 |
 | `BRIDGE_BIND` | `0.0.0.0` | 容器内监听地址 |
@@ -127,7 +131,17 @@ docker compose up -d
 | `TZ` | `Asia/Shanghai` | 容器时区 |
 | `DSH_HOME` | `/root/.dsh` | dsh 的配置与会话目录 |
 
-数据持久化在 `./data`（dsh home）和 `./workspace`（工作目录）两个目录。
+数据持久化在以下目录：
+
+| 宿主目录 | 容器内 | 说明 |
+|---|---|---|
+| `./data` | `/root/.dsh` | dsh home：会话、凭证、profile、插件 |
+| `./workspace` | `/workspace` | dsh 工作目录 |
+| `./data/ssh` | `/root/.ssh` | SSH 配置与密钥 |
+| `./data/woc` | `/root/woc` | 工作目录别名 |
+
+> 后两项是独立 bind mount，不是容器内软链。这样 `docker compose up -d`
+> 重建容器（升级）时，SSH 密钥和工作目录别名都不会随容器可写层一起丢失。
 
 ## 镜像
 
@@ -154,7 +168,7 @@ CI 里包含端到端冒烟测试：拉取镜像、启动容器、验证 `302 �
 - **容器内会把转发给 dsh 的 `Host` 改写成 `127.0.0.1`**，并删除 `Origin` /
   `Referer` 头。这是为了通过 dsh 的 `/api` 浏览器信任校验 —— 副作用是你换任何域名
   都不用改容器配置。
-- 本仓库不含任何密钥。`.env` 和运行时数据都已被 `.gitignore` 忽略。
+- 本仓库不含任何密钥。运行时数据（`data/`、`workspace/`）已被 `.gitignore` 忽略。
 
 ## 工作方式（实现细节）
 

@@ -7,33 +7,38 @@ services:
     #   dockerfile: Dockerfile
     container_name: dsh
     restart: unless-stopped
-    # 所有变量从 .env 读取（见 .env.example）。缺省值写在 ${VAR:-default} 里，
-    # 因此不建 .env 也能直接启动。
+    # 变量直接写在文件里，不依赖 .env —— 想改哪个直接改这里。
     environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      DSH_HOME: ${DSH_HOME:-/root/.dsh}
-      # 桥接端口：宿主机上的域名反代到这个端口（默认 3080）。
-      BRIDGE_PORT: ${BRIDGE_PORT:-3080}
-      # 桥接监听地址。默认 0.0.0.0（容器外可访问）。
-      BRIDGE_BIND: ${BRIDGE_BIND:-0.0.0.0}
+      TZ: Asia/Shanghai
+      # dsh home 目录（会话与凭证持久化到这里）。
+      DSH_HOME: /root/.dsh
+      # 桥接端口：宿主机上的域名反代到这个端口。
+      BRIDGE_PORT: 3080
+      # 桥接监听地址。0.0.0.0 = 容器外可访问。
+      BRIDGE_BIND: 0.0.0.0
       # dsh 自身监听端口（容器内部，只绑 loopback，不对外）。
-      DSH_PORT: ${DSH_PORT:-3081}
+      DSH_PORT: 3081
     ports:
       # 只暴露桥接端口；dsh 自身端口不对外。
-      # 宿主机反代只走本机回环时，推荐加上 127.0.0.1 前缀：
-      #   - "127.0.0.1:${BRIDGE_PORT:-3080}:${BRIDGE_PORT:-3080}"
-      - "${BRIDGE_PORT:-3080}:${BRIDGE_PORT:-3080}"
+      # 宿主机反代只走本机回环时，推荐改成：
+      #   - "127.0.0.1:3080:3080"
+      - "3080:3080"
     volumes:
       # dsh 的 home：会话与凭证。
       - ./data:/root/.dsh
       # dsh 的工作目录。
       - ./workspace:/workspace
+      # 下面两项把"容器可写层里会丢的路径"直接挂到持久目录。
+      # 否则 docker compose up -d（升级）重建容器后，/root/.ssh 里的密钥和
+      # /root/woc 这个工作目录别名会随可写层一起消失。
+      - ./data/ssh:/root/.ssh
+      - ./data/woc:/root/woc
     healthcheck:
       # 桥接无 token 访问 / 应返回 302（说明 dsh 已就绪且自动跳转生效）。
       test:
         - CMD-SHELL
         - |
-          code=$$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:$${BRIDGE_PORT:-3080}/ || true)
+          code=$$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:3080/ || true)
           case "$$code" in 302|200) exit 0 ;; *) exit 1 ;; esac
       interval: 30s
       timeout: 10s

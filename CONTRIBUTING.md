@@ -40,7 +40,7 @@ curl -s -o /dev/null -D- -H "Host: dsh.example.com" \
 
 - 任何真实 token、API key、密码、证书私钥
 - `data/` 和 `workspace/` 里的运行时数据
-- `.env`（用 `.env.example` 代替）
+- `.env` 文件（配置直接写在 `docker-compose.yml` 里，不需要环境变量文件）
 
 ## 发布
 

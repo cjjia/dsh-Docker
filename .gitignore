@@ -2,10 +2,9 @@
 data/
 workspace/
 
-# 本地环境文件
+# 本地环境文件（配置已全部写在 docker-compose.yml 里，不再需要 .env）
 .env
 .env.*
-!.env.example
 
 # 编辑器 / 系统
 .vscode/
