@@ -135,13 +135,42 @@ docker compose up -d
 
 | 宿主目录 | 容器内 | 说明 |
 |---|---|---|
+| `./data/home` | `/root` | 整个 home：任意工作目录、SSH 密钥等 |
 | `./data` | `/root/.dsh` | dsh home：会话、凭证、profile、插件 |
-| `./workspace` | `/workspace` | dsh 工作目录 |
-| `./data/ssh` | `/root/.ssh` | SSH 配置与密钥 |
-| `./data/woc` | `/root/woc` | 工作目录别名 |
+| `./workspace` | `/workspace` | dsh 的工作目录 |
 
-> 后两项是独立 bind mount，不是容器内软链。这样 `docker compose up -d`
-> 重建容器（升级）时，SSH 密钥和工作目录别名都不会随容器可写层一起丢失。
+### 为什么整体挂载 `/root`
+
+容器只把少数路径挂到持久卷上，其余都在**容器可写层**——`docker compose up -d`
+（升级）重建容器时会全部丢弃。
+
+如果只给某个具体目录单独加挂载（例如 `./data/foo:/root/foo`），那么：
+
+- 换个工作目录就得再加一行
+- 同时用多个目录就要加很多行
+- 一旦忘记加，那个目录里的东西重建后就没了
+
+所以这里直接**整体挂载 `/root`**：你在容器内 `/root` 下创建的任何目录都会落到
+宿主 `./data/home/`，重建容器后原样保留，不需要为每个目录单独配置。
+
+> **顺序很重要。** Docker 按声明顺序挂载，后挂的覆盖先挂的。`./data/home:/root`
+> 必须排在 `./data:/root/.dsh` **之前**，否则 dsh home 会被 `/root` 遮住、
+> 读出来是空的。
+
+### 初始化 `./data/home`
+
+`/root` 被挂载后，镜像里自带的 `.bashrc` / `.profile` 会被遮蔽（不影响 dsh 启动，
+但如果你想要它们，可以初始化一次）：
+
+```bash
+mkdir -p data/home
+docker run --rm -v "$PWD/data/home:/out" --entrypoint sh \
+  ghcr.io/cjjia/dsh-docker:latest -c "cp -a /root/. /out/"
+rm -rf data/home/.dsh   # 真实 dsh home 由 ./data 单独挂载
+```
+
+不初始化也能正常跑——`./data/home` 为空时，容器照样启动，
+只是没有那两三个 shell 配置文件。
 
 ## 镜像
 
