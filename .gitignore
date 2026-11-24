@@ -1,5 +1,6 @@
 # 运行时数据（不要提交）
 data/
+home/
 workspace/
 
 # 本地环境文件（配置已全部写在 docker-compose.yml 里，不再需要 .env）

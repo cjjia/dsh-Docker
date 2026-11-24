@@ -25,12 +25,12 @@ services:
       - "3080:3080"
     volumes:
       # 整体挂载 /root：你在容器内 /root 下创建的任何目录（工作目录、SSH 密钥
-      # 等等）都会持久化到宿主 ./data/home，重建容器不丢。
+      # 等等）都会持久化到宿主 ./home，重建容器不丢。
       # 这样不必为每个工作目录单独加一行挂载。
       #
       # 顺序很重要：Docker 按声明顺序挂载，后挂的覆盖先挂的。
       # /root 必须排在 /root/.dsh 之前，否则 dsh home 会被 /root 遮住。
-      - ./data/home:/root
+      - ./home:/root
       # 嵌套挂载 dsh home：会话、凭证、profile、插件。
       - ./data:/root/.dsh
       # dsh 的工作目录。
